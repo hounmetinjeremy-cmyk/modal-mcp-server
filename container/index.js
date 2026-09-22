@@ -8,11 +8,12 @@ import { randomUUID } from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-// Import par défaut + déstructuration : l'import nommé direct
-// (`import { ModalClient } from "modal"`) échoue à l'exécution dans certains
-// environnements Node à cause de l'interop ESM/CommonJS de ce package.
-import modalPkg from "modal";
-const { ModalClient } = modalPkg;
+import { createRequire } from "module";
+// Le package "modal" pose des soucis d'interop ESM/CJS selon l'environnement
+// (ni export nommé ni export par défaut détectés de façon fiable). On force
+// une résolution CommonJS avec createRequire, qui contourne ce problème.
+const require = createRequire(import.meta.url);
+const { ModalClient } = require("modal");
 
 const PORT = process.env.PORT || 8080;
 const app = express();
