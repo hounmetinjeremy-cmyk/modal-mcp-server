@@ -1,0 +1,20 @@
+{
+  "name": "modal-mcp-server",
+  "main": "worker.js",
+  "compatibility_date": "2026-01-01",
+  "containers": [
+    {
+      "class_name": "ModalMcpContainer",
+      "image": "./container/Dockerfile",
+      "max_instances": 5
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "MODAL_MCP_CONTAINER", "class_name": "ModalMcpContainer" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["ModalMcpContainer"] }
+  ]
+}
