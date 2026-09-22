@@ -1,76 +1,67 @@
-# Serveur MCP Modal — sur Cloudflare Containers
+# Serveur MCP Modal + Terminal Persistant
 
-Contrairement à un Worker classique (isolat V8 restreint), **Cloudflare
-Containers** fait tourner un vrai conteneur Docker Node.js complet — c'est
-ce qui permet d'utiliser le SDK Modal sans problème de compatibilité
-réseau/gRPC.
+Serveur MCP hébergé sur **Cloudflare Containers** (sandbox isolée V8), qui pilote des
+sandboxes **Modal** et expose un **terminal shell persistant**.
 
-## Prérequis
+## Outils MCP exposés
 
-- **Plan Workers Paid** (~5$/mois) — Containers ne fonctionne pas sur le
-  plan gratuit. Si tu as déjà des Workers payants pour tes autres projets
-  (Oracle Cloud MCP, Railway MCP, center-multivendor), tu es peut-être déjà
-  dessus — vérifie dans le dashboard Cloudflare (Workers & Pages →
-  Plans).
-- Docker installé localement (pour builder l'image).
-- Wrangler CLI v4+ : `npm install -g wrangler@latest`
+### Terminal persistant
+- `modal_terminal_run` — crée/récupère un sandbox Modal et exécute une commande
+- `modal_terminal_continue` — continue la même session avec `cwd` conservé
+- `modal_terminal_status` — sandbox, cwd, jobs et dernière activité
+- `modal_terminal_reset` — détruit le sandbox et réinitialise la session
+- `modal_terminal_background` — lance un job long en arrière-plan
+- `modal_terminal_jobs` — liste les jobs
+- `modal_terminal_attach` — récupère les logs d’un job
+- `modal_terminal_kill` — envoie SIGTERM/SIGKILL/SIGINT à un job
 
-## Structure du projet
+### Gestion Modal classique
+- `modal_create_sandbox`, `modal_list_sandboxes`, `modal_terminate_sandbox`
+- `modal_exec` — exécution one-shot dans un sandbox
 
-```
-modal-mcp-server/
-├── wrangler.jsonc       # config Worker + Container
-├── worker.js            # routeur : Worker -> Container
-└── container/
-    ├── Dockerfile
-    ├── package.json
-    └── index.js         # le vrai serveur MCP (Express + SDK Modal)
-```
+## Architecture du terminal
+
+1. Au premier `modal_terminal_run`, le serveur crée un **sandbox Modal**.
+2. Il y démarre un **daemon `bash` persistant** connecté à deux FIFOs :
+   - `/tmp/mcp_terminal_cmd` : entrée des commandes
+   - `/tmp/mcp_terminal_out` : sortie des commandes
+3. Après chaque commande, le `cwd` est sauvegardé dans `/tmp/mcp_cwd`.
+4. Les jobs en arrière-plan utilisent `nohup` et écrivent dans `/tmp/mcp_jobs/<jobId>.log`.
 
 ## Déploiement
 
 ```bash
 git clone https://github.com/hounmetinjeremy-cmyk/modal-mcp-server.git
 cd modal-mcp-server
+git checkout feature/terminal-persistant
 wrangler login
 
-# Génère ta clé sur https://modal.com/settings/tokens ("New Token")
+# Secrets Modal (https://modal.com/settings/tokens)
 wrangler secret put MODAL_TOKEN_ID
 wrangler secret put MODAL_TOKEN_SECRET
 
 wrangler deploy
 ```
 
-Wrangler build l'image Docker à partir de `container/Dockerfile` et la
-déploie automatiquement — pas besoin de push manuel vers un registre.
+## Configuration client MCP
 
-## ⚠️ Point à vérifier après déploiement
+```json
+{
+  "mcpServers": {
+    "ko": {
+      "url": "https://modal-mcp-server.<ton-compte>.workers.dev/mcp"
+    }
+  }
+}
+```
 
-Le passage des secrets Worker (`MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET`) vers
-l'intérieur du conteneur, dans `worker.js`, est écrit selon la doc connue
-au moment de l'écriture, mais l'API `@cloudflare/containers` évolue vite.
-Si le conteneur démarre mais que les outils Modal échouent avec "token
-manquant", vérifie la syntaxe exacte de passage des env vars sur
-https://developers.cloudflare.com/containers/ — la doc à jour fait
-autorité ici, pas ce fichier.
+## Exemple d’utilisation
 
-## Connecter à Claude / chap-libre
-
-Une fois déployé, Wrangler affiche l'URL publique du Worker, du type :
-`https://modal-mcp-server.<ton-compte>.workers.dev`
-
-URL du serveur MCP à ajouter : `https://modal-mcp-server.<ton-compte>.workers.dev/mcp`
-
-## Outils exposés
-
-- `modal_create_sandbox` — crée un sandbox isolé
-- `modal_exec` — exécute une commande shell dedans (clone, install, build, push...)
-- `modal_terminate_sandbox` — l'arrête
-- `modal_list_sandboxes` — liste les sandboxes ouverts
-
-## Coût
-
-- Workers Paid : ~5$/mois (fixe)
-- Container : facturé à la seconde d'usage réel (`sleepAfter: "10m"` coupe
-  le conteneur après 10 min d'inactivité)
-- Modal : crédit de 30$/mois qui se renouvelle, consommé par les sandboxes eux-mêmes
+```
+modal_terminal_run sessionId="dev-1" command="cd /tmp && pwd"
+modal_terminal_continue sessionId="dev-1" command="ls -la"
+modal_terminal_background sessionId="dev-1" command="for i in $(seq 1 10); do echo tick $i; sleep 2; done"
+modal_terminal_attach sessionId="dev-1" jobId="job_..."
+modal_terminal_kill sessionId="dev-1" jobId="job_..." signal="SIGKILL"
+modal_terminal_reset sessionId="dev-1"
+```
