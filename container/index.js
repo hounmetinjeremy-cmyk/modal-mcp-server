@@ -1,18 +1,26 @@
 // container/index.js
 // Tourne dans un Cloudflare Container (Node.js complet, pas dans l'isolat V8
-// des Workers classiques) -- c'est ce qui permet d'utiliser le SDK Modal
-// sans se heurter aux restrictions reseau/Node des Workers.
+// des Workers classiques) — c'est ce qui permet d'utiliser le SDK Modal
+// sans se heurter aux restrictions réseau/Node des Workers.
 
 import express from "express";
 import { randomUUID } from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { ModalClient } from "modal";
+// Import par défaut + déstructuration : l'import nommé direct
+// (`import { ModalClient } from "modal"`) échoue à l'exécution dans certains
+// environnements Node à cause de l'interop ESM/CommonJS de ce package.
+import modalPkg from "modal";
+const { ModalClient } = modalPkg;
 
 const PORT = process.env.PORT || 8080;
 const app = express();
 app.use(express.json());
+
+// ---------- Identifiants Modal ----------
+// Fournis en secrets Worker (wrangler secret put), transmis au conteneur
+// via wrangler.jsonc / worker.js — voir README pour le détail.
 
 function getModalClient() {
   const tokenId = process.env.MODAL_TOKEN_ID;
@@ -27,9 +35,12 @@ function getModalClient() {
 }
 
 app.get("/", (req, res) => res.send("modal-mcp-server: OK"));
+
+// Sonde de santé utilisée par Cloudflare Containers pour savoir que le
+// conteneur est prêt à recevoir du trafic.
 app.get("/health", (req, res) => res.status(200).send("ok"));
 
-const openSandboxes = new Map();
+const openSandboxes = new Map(); // id -> Sandbox
 
 function buildServer() {
   const server = new McpServer({ name: "modal-mcp-server", version: "1.0.0" });
@@ -37,9 +48,9 @@ function buildServer() {
   server.registerTool(
     "modal_create_sandbox",
     {
-      title: "Creer un sandbox Modal",
+      title: "Créer un sandbox Modal",
       description:
-        "Cree un sandbox Modal isole pour cloner et traiter un projet. Retourne un sandbox_id a reutiliser dans les autres outils.",
+        "Crée un sandbox Modal isolé pour cloner et traiter un projet. Retourne un sandbox_id à réutiliser dans les autres outils.",
       inputSchema: {
         image: z.string().default("python:3.12-slim"),
         appName: z.string().default("chap-libre"),
@@ -62,7 +73,7 @@ function buildServer() {
       return {
         content: [{
           type: "text",
-          text: `Sandbox cree. sandbox_id=${id} (image: ${image}, ${cpu} vCPU, ${memoryMb} Mo RAM, expire dans ${timeoutSeconds}s)`,
+          text: `Sandbox créé. sandbox_id=${id} (image: ${image}, ${cpu} vCPU, ${memoryMb} Mo RAM, expire dans ${timeoutSeconds}s)`,
         }],
       };
     }
@@ -71,9 +82,9 @@ function buildServer() {
   server.registerTool(
     "modal_exec",
     {
-      title: "Executer une commande dans un sandbox",
+      title: "Exécuter une commande dans un sandbox",
       description:
-        "Execute une commande shell dans un sandbox Modal deja cree (clone git, install, build, push...).",
+        "Exécute une commande shell dans un sandbox Modal déjà créé (clone git, install, build, push...).",
       inputSchema: {
         sandboxId: z.string(),
         command: z.array(z.string()),
@@ -100,8 +111,8 @@ function buildServer() {
   server.registerTool(
     "modal_terminate_sandbox",
     {
-      title: "Arreter un sandbox",
-      description: "Arrete et nettoie un sandbox Modal.",
+      title: "Arrêter un sandbox",
+      description: "Arrête et nettoie un sandbox Modal.",
       inputSchema: { sandboxId: z.string() },
     },
     async ({ sandboxId }) => {
@@ -111,7 +122,7 @@ function buildServer() {
       }
       await sandbox.terminate();
       openSandboxes.delete(sandboxId);
-      return { content: [{ type: "text", text: `Sandbox ${sandboxId} arrete.` }] };
+      return { content: [{ type: "text", text: `Sandbox ${sandboxId} arrêté.` }] };
     }
   );
 
@@ -149,4 +160,4 @@ app.post("/mcp", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`modal-mcp-server (container) ecoute sur ${PORT}`));
+app.listen(PORT, () => console.log(`modal-mcp-server (container) écoute sur ${PORT}`));
