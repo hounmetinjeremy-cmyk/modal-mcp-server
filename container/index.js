@@ -1,6 +1,5 @@
 // container/index.js
-// Tourne dans un Cloudflare Container (Node.js complet, pas dans l'isolat V8
-// des Workers classiques) — c'est ce qui permet d'utiliser le SDK Modal
+// Tourne dans un conteneur Node.js complet — c'est ce qui permet d'utiliser le SDK Modal
 // sans se heurter aux restrictions réseau/Node des Workers.
 
 import express from "express";
@@ -9,9 +8,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { createRequire } from "module";
-// Le package "modal" pose des soucis d'interop ESM/CJS selon l'environnement
-// (ni export nommé ni export par défaut détectés de façon fiable). On force
-// une résolution CommonJS avec createRequire, qui contourne ce problème.
+// Le package "modal" pose des soucis d'interop ESM/CJS selon l'environnement.
+// On force une résolution CommonJS avec createRequire, qui contourne ce problème.
 const require = createRequire(import.meta.url);
 const { ModalClient } = require("modal");
 
@@ -20,16 +18,14 @@ const app = express();
 app.use(express.json());
 
 // ---------- Identifiants Modal ----------
-// Fournis en secrets Worker (wrangler secret put), transmis au conteneur
-// via wrangler.jsonc / worker.js — voir README pour le détail.
+// Fournis via les variables d'environnement MODAL_TOKEN_ID / MODAL_TOKEN_SECRET.
 
 function getModalClient() {
   const tokenId = process.env.MODAL_TOKEN_ID;
   const tokenSecret = process.env.MODAL_TOKEN_SECRET;
   if (!tokenId || !tokenSecret) {
     throw new Error(
-      "MODAL_TOKEN_ID / MODAL_TOKEN_SECRET manquants. Configure-les avec " +
-      "`wrangler secret put` puis redeploie."
+      "MODAL_TOKEN_ID / MODAL_TOKEN_SECRET manquants. Configure-les dans les variables d'environnement du service."
     );
   }
   return new ModalClient({ tokenId, tokenSecret });
@@ -37,30 +33,30 @@ function getModalClient() {
 
 app.get("/", (req, res) => res.send("modal-mcp-server: OK"));
 
-// Sonde de santé utilisée par Cloudflare Containers pour savoir que le
-// conteneur est prêt à recevoir du trafic.
+// Sonde de santé
 app.get("/health", (req, res) => res.status(200).send("ok"));
 
 const openSandboxes = new Map(); // id -> Sandbox
 
 function buildServer() {
-  const server = new McpServer({ name: "modal-mcp-server", version: "1.0.0" });
+  const server = new McpServer({ name: "modal-mcp-server", version: "1.1.0" });
 
   server.registerTool(
     "modal_create_sandbox",
     {
       title: "Créer un sandbox Modal",
       description:
-        "Crée un sandbox Modal isolé pour cloner et traiter un projet. Retourne un sandbox_id à réutiliser dans les autres outils.",
+        "Crée un sandbox Modal isolé pour cloner et traiter un projet. Option gpu (ex. L4, A10G, L40S, A100, H100) pour un sandbox avec GPU. Retourne un sandbox_id à réutiliser dans les autres outils.",
       inputSchema: {
         image: z.string().default("python:3.12-slim"),
         appName: z.string().default("chap-libre"),
         cpu: z.number().default(1),
         memoryMb: z.number().default(1024),
         timeoutSeconds: z.number().default(600),
+        gpu: z.string().optional(),
       },
     },
-    async ({ image, appName, cpu, memoryMb, timeoutSeconds }) => {
+    async ({ image, appName, cpu, memoryMb, timeoutSeconds, gpu }) => {
       const modal = getModalClient();
       const modalApp = await modal.apps.fromName(appName, { createIfMissing: true });
       const img = modal.images.fromRegistry(image);
@@ -68,13 +64,14 @@ function buildServer() {
         cpu,
         memory: memoryMb,
         timeout: timeoutSeconds,
+        ...(gpu ? { gpu } : {}),
       });
       const id = randomUUID();
       openSandboxes.set(id, sandbox);
       return {
         content: [{
           type: "text",
-          text: `Sandbox créé. sandbox_id=${id} (image: ${image}, ${cpu} vCPU, ${memoryMb} Mo RAM, expire dans ${timeoutSeconds}s)`,
+          text: `Sandbox créé. sandbox_id=${id} (image: ${image}, ${cpu} vCPU, ${memoryMb} Mo RAM, GPU: ${gpu || "aucun"}, expire dans ${timeoutSeconds}s)`,
         }],
       };
     }
