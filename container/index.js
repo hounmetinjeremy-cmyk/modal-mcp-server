@@ -1,17 +1,12 @@
 // container/index.js
-// Tourne dans un conteneur Node.js complet — c'est ce qui permet d'utiliser le SDK Modal
-// sans se heurter aux restrictions réseau/Node des Workers.
+// Tourne dans un conteneur Node.js complet — nécessaire pour le SDK Modal (modal-js).
 
 import express from "express";
 import { randomUUID } from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { createRequire } from "module";
-// Le package "modal" pose des soucis d'interop ESM/CJS selon l'environnement.
-// On force une résolution CommonJS avec createRequire, qui contourne ce problème.
-const require = createRequire(import.meta.url);
-const { ModalClient } = require("modal");
+import { ModalClient } from "modal";
 
 const PORT = process.env.PORT || 8080;
 const app = express();
@@ -32,14 +27,12 @@ function getModalClient() {
 }
 
 app.get("/", (req, res) => res.send("modal-mcp-server: OK"));
-
-// Sonde de santé
 app.get("/health", (req, res) => res.status(200).send("ok"));
 
 const openSandboxes = new Map(); // id -> Sandbox
 
 function buildServer() {
-  const server = new McpServer({ name: "modal-mcp-server", version: "1.1.0" });
+  const server = new McpServer({ name: "modal-mcp-server", version: "1.2.0" });
 
   server.registerTool(
     "modal_create_sandbox",
@@ -62,8 +55,8 @@ function buildServer() {
       const img = modal.images.fromRegistry(image);
       const sandbox = await modal.sandboxes.create(modalApp, img, {
         cpu,
-        memory: memoryMb,
-        timeout: timeoutSeconds,
+        memoryMiB: memoryMb,
+        timeoutMs: timeoutSeconds * 1000,
         ...(gpu ? { gpu } : {}),
       });
       const id = randomUUID();
